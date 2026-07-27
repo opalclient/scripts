@@ -445,15 +445,28 @@ function createOpalStub(options = {}) {
         entitiesInRange: [],
         entities: [],
         effects: [],
+        // Input state a test drives directly; `input` reads through these.
+        heldKeys: new Set(),
+        heldMouse: new Set(),
+        mouseX: 0,
+        mouseY: 0,
+        mouseDeltaX: 0,
+        mouseDeltaY: 0,
     };
 
-    /** Reset the staged world to "not in a world, nothing nearby". */
+    /** Reset the staged world to "not in a world, nothing nearby", and drop all input state. */
     function resetStubState() {
         stubState.player = null;
         stubState.world = null;
         stubState.entitiesInRange = [];
         stubState.entities = [];
         stubState.effects = [];
+        stubState.heldKeys = new Set();
+        stubState.heldMouse = new Set();
+        stubState.mouseX = 0;
+        stubState.mouseY = 0;
+        stubState.mouseDeltaX = 0;
+        stubState.mouseDeltaY = 0;
     }
 
     /** Every `palette.createView` config, keyed by id (capture surface). */
@@ -843,6 +856,24 @@ function createOpalStub(options = {}) {
         },
     });
 
+    // Held-key / cursor state a test drives directly: `stub.stubState.heldKeys.add(keys.W)`.
+    const input = hostObject("input", {
+        isKeyDown: (code) => stubState.heldKeys.has(code),
+        isMouseDown: (button) => stubState.heldMouse.has(button),
+        getMouseX: () => stubState.mouseX,
+        getMouseY: () => stubState.mouseY,
+        getMouseDeltaX: () => {
+            const d = stubState.mouseDeltaX;
+            stubState.mouseDeltaX = 0;
+            return d;
+        },
+        getMouseDeltaY: () => {
+            const d = stubState.mouseDeltaY;
+            stubState.mouseDeltaY = 0;
+            return d;
+        },
+    });
+
     // The real `keys` global exports a fixed set of int fields; a typo must fail,
     // not read 0. Values are the actual GLFW codes.
     const keys = hostObject("keys", {
@@ -1071,6 +1102,7 @@ function createOpalStub(options = {}) {
         world,
         esp,
         palette,
+        input,
         keys,
         timer,
         mc,

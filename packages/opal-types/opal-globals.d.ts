@@ -816,6 +816,10 @@ interface InteractionCodeEvent {
 interface KeyPressEvent extends InteractionCodeEvent {}
 /** `mousePress` — a mouse button is pressed. Not cancellable. */
 interface MousePressEvent extends InteractionCodeEvent {}
+/** `keyRelease` — a keyboard key is released. Not cancellable. */
+interface KeyReleaseEvent extends InteractionCodeEvent {}
+/** `mouseRelease` — a mouse button is released. Not cancellable. */
+interface MouseReleaseEvent extends InteractionCodeEvent {}
 
 /** `resolutionChange` — the GUI is resized (framebuffer resolution changed). Carries no data. Not cancellable. */
 interface ResolutionChangeEvent {}
@@ -878,6 +882,8 @@ interface ScriptModuleEvents {
     chatReceived: (event: ChatReceivedEvent) => void;
     keyPress: (event: KeyPressEvent) => void;
     mousePress: (event: MousePressEvent) => void;
+    keyRelease: (event: KeyReleaseEvent) => void;
+    mouseRelease: (event: MouseReleaseEvent) => void;
     resolutionChange: (event: ResolutionChangeEvent) => void;
 }
 
@@ -1797,6 +1803,29 @@ interface PaletteViewConfig {
     charTyped?(codepoint: number): boolean | void;
     /** Handles a click in content-local coordinates (origin = top-left of the content rect). Return `true` to consume. */
     mouseClicked?(localX: number, localY: number, button: number): boolean | void;
+    /** Handles a mouse-button release in content-local coordinates. Return `true` to consume. */
+    mouseReleased?(localX: number, localY: number, button: number): boolean | void;
+    /** Handles cursor motion in content-local coordinates. Motion is not consumable. */
+    mouseMoved?(localX: number, localY: number): void;
+    /**
+     * Handles a drag — motion with a button held. `dragX`/`dragY` are the displacement since the
+     * previous drag event, already in the same logical space as `localX`/`localY`.
+     */
+    mouseDragged?(localX: number, localY: number, button: number, dragX: number, dragY: number): boolean | void;
+    /** Handles a scroll-wheel event in content-local coordinates. Return `true` to consume. */
+    mouseScrolled?(localX: number, localY: number, horizontal: number, vertical: number): boolean | void;
+    /**
+     * Handles a key release. `Esc` never reaches this handler. For held-key state prefer polling
+     * `input.isKeyDown` — a release that arrives while the view is closing is never delivered.
+     */
+    keyReleased?(keyCode: number, mods: number): boolean | void;
+    /** Called once when the view is detached, for teardown: free images, stop timers, save state. */
+    onClosed?(): void;
+    /**
+     * Hides and locks the cursor while this view is open, so `input.getMouseDeltaX/Y()` report
+     * unbounded motion. `Esc` always releases the lock and closes the view.
+     */
+    pointerLock?: boolean;
 }
 
 /**
@@ -1813,3 +1842,30 @@ interface PaletteProxy {
     removeView(id: string): void;
 }
 declare const palette: PaletteProxy;
+
+/* ============================================================================
+ * input — core/input.mdx
+ * ========================================================================== */
+
+/**
+ * Polled keyboard and cursor state. Prefer this over pairing `keyPressed` with
+ * `keyReleased` for held state such as movement input: a release that is never
+ * delivered — the view closes mid-hold, the window loses focus — leaves a
+ * press-counting surface holding an input forever, while a query has no state
+ * to desynchronise.
+ */
+interface InputProxy {
+    /** Whether a key is currently held. `code` is a `keys.*` value. */
+    isKeyDown(code: number): boolean;
+    /** Whether a mouse button is currently held (0 = left, 1 = right, 2 = middle). */
+    isMouseDown(button: number): boolean;
+    /** Cursor x in GUI-scaled coordinates — the space `renderer` draws in. */
+    getMouseX(): number;
+    /** Cursor y in GUI-scaled coordinates. */
+    getMouseY(): number;
+    /** Raw cursor x motion since the previous read; `0` unless a `pointerLock` view is open. */
+    getMouseDeltaX(): number;
+    /** Raw cursor y motion since the previous read; `0` unless a `pointerLock` view is open. */
+    getMouseDeltaY(): number;
+}
+declare const input: InputProxy;
