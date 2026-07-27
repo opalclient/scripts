@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pointer input on `palette.createView` views** — six new optional
+  `PaletteViewConfig` callbacks: `mouseReleased`, `mouseMoved`, `mouseDragged`,
+  `mouseScrolled`, `keyReleased`, and `onClosed` (called once on teardown,
+  regardless of how the view closed). A new `pointerLock` flag hides and locks
+  the cursor while the view is open, for FPS-style mouse-look; `Esc` always
+  releases the lock and closes the view first, so a view can never trap the
+  user.
+- **The `input` global** — polled keyboard/cursor state: `isKeyDown`,
+  `isMouseDown`, `getMouseX`/`getMouseY`, and `getMouseDeltaX`/
+  `getMouseDeltaY`. The delta getters drain on read (each call returns motion
+  since the previous read) and report `0` unless a `pointerLock` view is open.
+  Prefer this over pairing `keyPressed` with `keyReleased` for held state such
+  as movement input — a release that never arrives (the view closes mid-hold,
+  the window loses focus) can't desync a poll the way it can a counter.
+- **`keyRelease` and `mouseRelease` module events** — the release-side twins
+  of `keyPress`/`mousePress`, delivering the same `InteractionCodeEvent`
+  (`getCode()`) payload shape.
+
 ### Fixed
 
 - **`scripts/chomp/` (v1.2.1)** — perk-draft cards no longer spill their text
