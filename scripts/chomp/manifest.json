@@ -1,7 +1,7 @@
 {
     "id": "chomp",
     "name": "Chomp",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "authors": ["trq"],
     "description": "Roguelite arcade micro-game for the command palette.",
     "category": "ui",

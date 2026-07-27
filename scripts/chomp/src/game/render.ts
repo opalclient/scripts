@@ -489,21 +489,42 @@ export function createRender(game: GameState, vfx: VfxSystem, onStartScreen: () 
             renderer.roundedRect(cx, cy, cardW, cardH, cardH * 0.07, renderer.withAlpha(theme.panel, sel ? 255 : 150));
             if (sel) renderer.roundedRect(cx, cy, cardW, cardH * 0.05, cardH * 0.025, accent); // selected: lit top bar
 
+            const tx = cx + pad;
+            const top = cy + cardH * 0.2;
+            const inner = cardW - pad * 2;
+            const avail = cardH * 0.8 - pad;
             const ns = cardW * 0.13;
-            renderer.text("productsans-bold", card.name, cx + pad, cy + cardH * 0.2, ns, accent);
             const ds = cardW * 0.088;
-            renderer.text("productsans-medium", card.desc, cx + pad, cy + cardH * 0.42, ds, theme.text);
-            if (card.cursed) {
-                renderer.text("productsans-bold", TEXT.cursed, cx + pad, cy + cardH * 0.66, ds, theme.danger);
-                renderer.text(
-                    "productsans-medium",
-                    card.curseDesc as string,
-                    cx + pad,
-                    cy + cardH * 0.82,
-                    ds * 0.95,
-                    theme.danger,
-                );
-            }
+            // One pass over the card's text blocks at scale `s`: measures with
+            // `draw` false, draws with it true. Perk copy is arbitrary length, so
+            // the blocks flow (each wrapped to `inner`) rather than sitting on
+            // fixed y-fractions.
+            const blocks = (s: number, draw: boolean): number => {
+                let ty = top;
+                ty += flowText("productsans-bold", card.name, tx, ty, ns * s, accent, inner, draw);
+                ty += ds * s * 0.35;
+                ty += flowText("productsans-medium", card.desc, tx, ty, ds * s, theme.text, inner, draw);
+                if (card.cursed) {
+                    ty += ds * s * 0.5;
+                    ty += flowText("productsans-bold", TEXT.cursed, tx, ty, ds * s, theme.danger, inner, draw);
+                    ty += flowText(
+                        "productsans-medium",
+                        card.curseDesc as string,
+                        tx,
+                        ty,
+                        ds * s * 0.95,
+                        theme.danger,
+                        inner,
+                        draw,
+                    );
+                }
+                return ty - top;
+            };
+            let s = 1;
+            while (s > 0.45 && blocks(s, false) > avail) s *= 0.92; // shrink a tall (usually cursed) card to fit
+            // Clip to the card so a future layout slip truncates inside the card
+            // instead of bleeding across the screen.
+            renderer.scissor(cx, cy, cardW, cardH, () => blocks(s, true));
             cx += cardW + gap;
         }
 
@@ -511,6 +532,30 @@ export function createRender(game: GameState, vfx: VfxSystem, onStartScreen: () 
         const hs = ts * 0.5;
         const hw = renderer.textWidth("productsans-medium", hint, hs);
         renderer.text("productsans-medium", hint, x + (w - hw) / 2, y + h * 0.88, hs, theme.dim);
+    }
+
+    // Shared: draw `text` wrapped to `maxW`, one line per `size * 1.25`, from `y`
+    // down. Returns the height the block consumes; with `draw` false it measures
+    // without drawing, which is how a caller sizes a block before committing to it.
+    // Wrapping goes through renderer.wrapText so the break points come from the
+    // real font metrics rather than a character-count guess.
+    function flowText(
+        font: FontName,
+        text: string,
+        x: number,
+        y: number,
+        size: number,
+        color: number,
+        maxW: number,
+        draw: boolean,
+    ): number {
+        const lines = renderer.wrapText(font, text, maxW, size);
+        const count = lines.size();
+        const lh = size * 1.25;
+        if (draw) {
+            for (let i = 0; i < count; i++) renderer.text(font, lines.get(i) as string, x, y + i * lh, size, color);
+        }
+        return count * lh;
     }
 
     // Shared: draw `text` centred on cx, shrinking to fit maxW.

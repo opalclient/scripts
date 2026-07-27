@@ -1169,6 +1169,167 @@ let gateSummary = [];
     }
 }
 
+// ---- Draft card layout ------------------------------------------------------
+// Independent layout math, mirroring drawDraft's contract (game/render.ts) the
+// same way reachabilityError above re-derives the maze rules: on an x/y/w/h
+// surface the card row sits at cy = y + h*0.26 with cardH = h*0.5; gap =
+// w*0.025 and cardW = min(w*0.27, (w*0.92 - gap*(n-1))/n); every card insets its
+// content by pad = cardW*0.1, leaving inner = cardW - 2*pad for text. The title
+// (y + h*0.16) and the hint (y + h*0.88) sit outside the card band on purpose —
+// they are centred on the whole surface and are allowed to be wider than a card.
+function draftLayout(x, y, w, h, n) {
+    const gap = w * 0.025;
+    const cardW = Math.min(w * 0.27, (w * 0.92 - gap * (n - 1)) / n);
+    const cardH = h * 0.5;
+    const pad = cardW * 0.1;
+    const totalW = cardW * n + gap * (n - 1);
+    return {
+        cx0: x + (w - totalW) / 2,
+        cy: y + h * 0.26,
+        cardW,
+        cardH,
+        gap,
+        pad,
+        inner: cardW - 2 * pad,
+    };
+}
+
+// Plant `n` cards built from the real PERKS / CURSES tables so the assertions run
+// against shipped copy, not a synthetic worst case. `curseAt` picks the curse for
+// each slot (null -> a plain card).
+function plantDraft(g, perks, curses) {
+    const st = g.__test.state;
+    st.state = "draft";
+    st.draft = {
+        sel: 0,
+        cards: perks.map((p, i) => {
+            const curse = curses[i] || null;
+            return {
+                perkId: p.id,
+                name: p.name,
+                desc: p.desc,
+                cursed: !!curse,
+                curseId: curse ? curse.id : null,
+                curseDesc: curse ? curse.desc : null,
+            };
+        }),
+    };
+}
+
+// Run `fn` with renderer.text / renderer.scissor instrumented, returning every
+// text draw (with the width the renderer reported) and every scissor rect, each
+// text tagged with the innermost clip it landed in. Members are restored after.
+function captureDraws(fn) {
+    const realText = renderer.text;
+    const realScissor = renderer.scissor;
+    const texts = [];
+    const clips = [];
+    let current = null;
+    renderer.scissor = (sx, sy, sw, sh, content) => {
+        const prev = current;
+        current = { x: sx, y: sy, w: sw, h: sh, texts: [] };
+        clips.push(current);
+        try {
+            return realScissor(sx, sy, sw, sh, content);
+        } finally {
+            current = prev;
+        }
+    };
+    renderer.text = (font, text, tx, ty, size, color) => {
+        const width = realText(font, text, tx, ty, size, color);
+        const draw = { font, text, x: tx, y: ty, size, width, clip: current };
+        texts.push(draw);
+        if (current) current.texts.push(draw);
+        return width;
+    };
+    try {
+        fn();
+    } finally {
+        renderer.text = realText;
+        renderer.scissor = realScissor;
+    }
+    return { texts, clips };
+}
+
+// Test 23 — every line of card text fits the card's inner width. Walks the whole
+// PERKS table in groups (plus every CURSES desc) at both draft widths (3 cards,
+// and 4 under Lucky Draft — the narrower, binding case) and at two surface sizes.
+let t23summary = "n/a";
+let t23worst = 0;
+{
+    const SURFACES = [
+        { x: 0, y: 0, w: 800, h: 600 },
+        { x: 0, y: 0, w: 480, h: 320 },
+    ];
+    let checked = 0;
+    let overflowed = 0;
+    let firstOverflow = null;
+    for (const n of [3, 4]) {
+        for (let i = 0; i < PERKS.length; i += n) {
+            const slice = PERKS.slice(i, i + n);
+            if (slice.length < n) continue;
+            // Rotate the curse table so every curseDesc is drawn at least once.
+            const curseSlice = slice.map((_, k) => CURSES[(i + k) % CURSES.length]);
+            for (const s of SURFACES) {
+                const g = createGame();
+                plantDraft(g, slice, curseSlice);
+                const lay = draftLayout(s.x, s.y, s.w, s.h, n);
+                const { texts } = captureDraws(() => g.render(s.x, s.y, s.w, s.h));
+                const inBand = texts.filter((t) => t.y >= lay.cy && t.y <= lay.cy + lay.cardH);
+                for (const t of inBand) {
+                    checked++;
+                    const over = t.width - lay.inner;
+                    if (over > 0.001) {
+                        overflowed++;
+                        if (over > t23worst) t23worst = over;
+                        if (!firstOverflow) {
+                            firstOverflow = `${n} cards @ ${s.w}x${s.h}: "${t.text}" is ${t.width.toFixed(1)}px wide, inner ${lay.inner.toFixed(1)}px`;
+                        }
+                    }
+                }
+                if (inBand.length === 0) fail(`draft text fit: no card text drawn at ${n} cards @ ${s.w}x${s.h}`);
+            }
+        }
+    }
+    if (overflowed > 0) {
+        fail(`draft text fit: ${overflowed}/${checked} card text draws overflow the card (worst +${t23worst.toFixed(1)}px) — first: ${firstOverflow}`);
+    } else {
+        auditChecks++;
+    }
+    t23summary = `${checked} card text draws · ${overflowed} overflowing`;
+}
+
+// Test 24 — card content is scissor-clipped to its own card box, so a future
+// layout slip truncates inside the card instead of bleeding across the screen.
+let t24summary = "n/a";
+{
+    const s = { x: 0, y: 0, w: 800, h: 600 };
+    const n = 4;
+    const g = createGame();
+    plantDraft(g, PERKS.slice(0, n), PERKS.slice(0, n).map((_, k) => CURSES[k % CURSES.length]));
+    const lay = draftLayout(s.x, s.y, s.w, s.h, n);
+    const { clips } = captureDraws(() => g.render(s.x, s.y, s.w, s.h));
+    const cardClips = clips.filter((c) => Math.abs(c.w - lay.cardW) < 0.001 && Math.abs(c.h - lay.cardH) < 0.001);
+    if (cardClips.length !== n) {
+        fail(`draft clip: ${cardClips.length} card-sized scissor rect(s), expected ${n} (card content must be clipped to its card)`);
+    } else {
+        let escaped = 0;
+        cardClips.forEach((c, i) => {
+            const wantX = lay.cx0 + i * (lay.cardW + lay.gap);
+            if (Math.abs(c.x - wantX) > 0.001 || Math.abs(c.y - lay.cy) > 0.001) {
+                fail(`draft clip: card ${i} clip at (${c.x.toFixed(1)},${c.y.toFixed(1)}), expected (${wantX.toFixed(1)},${lay.cy.toFixed(1)})`);
+            }
+            if (c.texts.length === 0) fail(`draft clip: card ${i} drew no text inside its clip`);
+            for (const t of c.texts) {
+                if (t.y < c.y - 0.001 || t.y > c.y + c.h + 0.001) escaped++;
+            }
+        });
+        if (escaped > 0) fail(`draft clip: ${escaped} text draw(s) placed outside the card box vertically`);
+        else auditChecks++;
+        t24summary = `${cardClips.length} card clips · ${cardClips.reduce((a, c) => a + c.texts.length, 0)} clipped text draws`;
+    }
+}
+
 // Grep gates — walk src/**/*.ts and regex-assert the invariants that keep the
 // split honest across every module. Encoded here so they hold permanently, not
 // just at review time (each would fail on a planted violation).
@@ -1278,6 +1439,8 @@ console.log(`toll booth: ${t19summary}`);
 console.log(`bulldozer: ${t20summary}`);
 console.log(`storage-absent session: ${t21summary}`);
 console.log(`30-round autoplay x3: ${t22summary}`);
+console.log(`draft card text fit: ${t23summary}`);
+console.log(`draft card clipping: ${t24summary}`);
 console.log(`audit gates: ${gateSummary.join(" · ")}`);
 
 if (failures === 0) {

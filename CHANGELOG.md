@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`scripts/chomp/` (v1.2.1)** — perk-draft cards no longer spill their text
+  past the card edge. Every card block (name, description, the `CURSED` label
+  and the curse line) now wraps through `renderer.wrapText` and flows down the
+  card instead of sitting on fixed y-fractions, a tall card shrinks its type to
+  fit, and the whole card body draws inside a `renderer.scissor` so a future
+  layout slip truncates inside the card rather than bleeding across the screen.
+  Two harness checks lock it in: every line of every shipped perk/curse string
+  is measured against the card's inner width at both draft sizes, and the card
+  clip rects are asserted to exist and match the card boxes.
+
 ## [0.2.0] — 2026-07-22
 
 ### Added
